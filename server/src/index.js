@@ -1,14 +1,28 @@
 const WebSocket = require('ws');
+const http = require('http');
 
 const PORT = process.env.PORT || 3000;
 
 // Store rooms and their users
 const rooms = new Map();
 
-// Create WebSocket server
-const wss = new WebSocket.Server({ port: PORT });
+// Create HTTP server for health checks
+const server = http.createServer((req, res) => {
+  if (req.url === '/health') {
+    res.writeHead(200, { 'Content-Type': 'text/plain' });
+    res.end('OK');
+  } else {
+    res.writeHead(404, { 'Content-Type': 'text/plain' });
+    res.end('Not Found');
+  }
+});
 
-console.log(`[VideoSync Server] Running on port ${PORT}`);
+// Create WebSocket server attached to HTTP server
+const wss = new WebSocket.Server({ server });
+
+server.listen(PORT, () => {
+  console.log(`[VideoSync Server] WebSocket and HTTP running on port ${PORT}`);
+});
 
 wss.on('connection', (ws) => {
   console.log('[Server] New client connected');
@@ -125,15 +139,6 @@ wss.on('connection', (ws) => {
         client.send(messageStr);
       }
     });
-  }
-});
-
-// Health check endpoint (for Railway/Render)
-const http = require('http');
-const server = http.createServer((req, res) => {
-  if (req.url === '/health') {
-    res.writeHead(200);
-    res.end('OK');
   }
 });
 
