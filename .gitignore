@@ -1,0 +1,13 @@
+node_modules/
+.env
+.DS_Store
+*.log
+dist/
+build/
+plan.md
+DEPLOY.md
+HOW_IT_WORKS.md
+PROJECT_SUMMARY.md
+QUICKSTART.md
+README.md
+

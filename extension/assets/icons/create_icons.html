@@ -1,0 +1,40 @@
+<!DOCTYPE html>
+<html>
+<body>
+<canvas id="canvas16" width="16" height="16"></canvas>
+<canvas id="canvas48" width="48" height="48"></canvas>
+<canvas id="canvas128" width="128" height="128"></canvas>
+<script>
+function createIcon(canvasId, size) {
+  const canvas = document.getElementById(canvasId);
+  const ctx = canvas.getContext('2d');
+  
+  // Background
+  ctx.fillStyle = '#4285f4';
+  ctx.fillRect(0, 0, size, size);
+  
+  // Play symbol
+  ctx.fillStyle = 'white';
+  ctx.beginPath();
+  ctx.moveTo(size * 0.3, size * 0.25);
+  ctx.lineTo(size * 0.3, size * 0.75);
+  ctx.lineTo(size * 0.7, size * 0.5);
+  ctx.closePath();
+  ctx.fill();
+  
+  // Download
+  canvas.toBlob(blob => {
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = 'icon' + size + '.png';
+    a.click();
+  });
+}
+
+createIcon('canvas16', 16);
+setTimeout(() => createIcon('canvas48', 48), 100);
+setTimeout(() => createIcon('canvas128', 128), 200);
+</script>
+</body>
+</html>

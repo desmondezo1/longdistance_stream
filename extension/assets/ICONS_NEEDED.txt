@@ -1,0 +1,15 @@
+TEMPORARY SOLUTION FOR ICONS:
+
+You can use ANY PNG images as placeholders. Just rename them to:
+- icon16.png (any small image, Chrome will resize)
+- icon48.png (any small image, Chrome will resize)
+- icon128.png (any small image, Chrome will resize)
+
+Quick options:
+
+1. Screenshot any emoji or icon from your screen and save as PNG
+2. Download from: https://www.iconfinder.com/search?q=play&price=free
+3. Use the create_icons.html file in this folder (open in browser, it will download the icons)
+4. Or just continue without icons - the extension will work, just won't show an icon
+
+The extension will work perfectly fine without custom icons - Chrome will just show a default placeholder.

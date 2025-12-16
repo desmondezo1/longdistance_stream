@@ -1,0 +1,16 @@
+{
+  "name": "video-sync-server",
+  "version": "1.0.0",
+  "description": "WebSocket server for video synchronization",
+  "main": "src/index.js",
+  "scripts": {
+    "start": "node src/index.js",
+    "dev": "node src/index.js"
+  },
+  "keywords": ["video", "sync", "websocket"],
+  "author": "",
+  "license": "MIT",
+  "dependencies": {
+    "ws": "^8.18.0"
+  }
+}

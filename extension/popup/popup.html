@@ -1,0 +1,51 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <title>Video Sync</title>
+  <link rel="stylesheet" href="popup.css">
+</head>
+<body>
+  <div class="container">
+    <h1>Video Sync</h1>
+
+    <div id="status" class="status">
+      <span class="status-indicator"></span>
+      <span id="status-text">Disconnected</span>
+    </div>
+
+    <div class="section">
+      <h3>Server Settings</h3>
+      <input type="text" id="server-url" placeholder="Server URL (e.g., ws://localhost:3000)" value="ws://localhost:3000">
+    </div>
+
+    <div class="section">
+      <h3>Join or Create Room</h3>
+      <input type="text" id="room-id" placeholder="Enter room code">
+      <button id="create-room" class="btn btn-primary">Create New Room</button>
+      <button id="join-room" class="btn btn-secondary">Join Room</button>
+    </div>
+
+    <div id="room-info" class="section hidden">
+      <h3>Current Room</h3>
+      <div class="room-code">
+        <strong>Room Code:</strong>
+        <span id="current-room"></span>
+        <button id="copy-room" class="btn-small">Copy</button>
+      </div>
+      <p class="users-count">Users in room: <span id="user-count">1</span></p>
+      <button id="leave-room" class="btn btn-danger">Leave Room</button>
+    </div>
+
+    <div class="section">
+      <h3>Sync Settings</h3>
+      <label>
+        <input type="checkbox" id="auto-sync" checked>
+        Auto-sync every 5 seconds
+      </label>
+    </div>
+  </div>
+
+  <script src="popup.js"></script>
+</body>
+</html>
