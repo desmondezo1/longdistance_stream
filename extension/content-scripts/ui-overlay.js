@@ -16,6 +16,23 @@ class VideoSyncUI {
     this.cadmiumReady = false;
     this.useCadmium = false;
 
+    // Reconnection handling
+    this.reconnectAttempts = 0;
+    this.maxReconnectAttempts = 10;
+    this.reconnectDelay = 2000; // Start with 2 seconds
+    this.reconnectTimer = null;
+    this.isReconnecting = false;
+
+    // Connection details for reconnection
+    this.lastServerUrl = null;
+    this.lastApiKey = null;
+
+    // Heartbeat to keep connection alive
+    this.heartbeatInterval = null;
+    this.heartbeatTimer = 30000; // Send ping every 30 seconds
+    this.missedHeartbeats = 0;
+    this.maxMissedHeartbeats = 3;
+
     this.init();
   }
 
@@ -481,11 +498,24 @@ class VideoSyncUI {
       await this.saveConfig('connectionState', { serverUrl, roomId, apiKey });
       this.roomId = roomId;
 
+      // Save connection details for reconnection
+      this.lastServerUrl = serverUrl;
+      this.lastApiKey = apiKey;
+
       // Connect WebSocket
       this.socket = new WebSocket(serverUrl);
 
       this.socket.onopen = () => {
         this.log('Connected to server', 'success');
+
+        // Reset reconnection state
+        this.reconnectAttempts = 0;
+        this.isReconnecting = false;
+        this.missedHeartbeats = 0;
+
+        // Start heartbeat
+        this.startHeartbeat();
+
         this.socket.send(JSON.stringify({
           type: 'authenticate',
           apiKey: apiKey
@@ -496,20 +526,37 @@ class VideoSyncUI {
         try {
           const message = JSON.parse(event.data);
           console.log('[VideoSync] ← Server message:', message.type, message);
-          this.handleServerMessage(message);
+
+          // Reset missed heartbeats on any message
+          if (message.type === 'pong') {
+            this.missedHeartbeats = 0;
+            console.log('[VideoSync] ← Heartbeat pong received');
+          } else {
+            this.handleServerMessage(message);
+          }
         } catch (err) {
           this.log(`Parse error: ${err.message}`, 'error');
         }
       };
 
-      this.socket.onerror = () => {
+      this.socket.onerror = (error) => {
+        console.error('[VideoSync] WebSocket error:', error);
         this.log('Connection error', 'error');
         this.updateStatus('disconnected');
       };
 
-      this.socket.onclose = () => {
+      this.socket.onclose = (event) => {
+        console.log('[VideoSync] WebSocket closed:', event.code, event.reason);
         this.log('Connection closed');
-        // Don't change status immediately - might reconnect
+        this.updateStatus('disconnected');
+
+        // Stop heartbeat
+        this.stopHeartbeat();
+
+        // Attempt to reconnect if we have connection details
+        if (this.roomId && this.lastServerUrl && this.lastApiKey) {
+          this.scheduleReconnect();
+        }
       };
 
     } catch (error) {
@@ -789,6 +836,16 @@ class VideoSyncUI {
   }
 
   disconnect() {
+    // Stop heartbeat
+    this.stopHeartbeat();
+
+    // Cancel any pending reconnection
+    if (this.reconnectTimer) {
+      clearTimeout(this.reconnectTimer);
+      this.reconnectTimer = null;
+    }
+    this.isReconnecting = false;
+
     if (this.socket) {
       this.socket.send(JSON.stringify({
         type: 'leave-room',
@@ -800,10 +857,117 @@ class VideoSyncUI {
     }
 
     this.roomId = null;
+    this.lastServerUrl = null;
+    this.lastApiKey = null;
     chrome.storage.local.remove('connectionState');
     this.updateStatus('disconnected');
     this.log('Disconnected', 'success');
     this.showScreen('menu');
+  }
+
+  /**
+   * Start heartbeat to keep connection alive
+   */
+  startHeartbeat() {
+    // Clear any existing heartbeat
+    this.stopHeartbeat();
+
+    console.log('[VideoSync] Starting heartbeat (30s interval)');
+
+    this.heartbeatInterval = setInterval(() => {
+      if (this.socket && this.socket.readyState === WebSocket.OPEN) {
+        // Send ping
+        this.socket.send(JSON.stringify({
+          type: 'ping',
+          timestamp: Date.now()
+        }));
+        console.log('[VideoSync] → Heartbeat ping sent');
+
+        // Increment missed heartbeats
+        this.missedHeartbeats++;
+
+        // If too many missed heartbeats, assume connection is dead
+        if (this.missedHeartbeats >= this.maxMissedHeartbeats) {
+          console.warn('[VideoSync] Too many missed heartbeats, closing connection');
+          this.log('Connection timeout', 'error');
+          this.socket.close();
+        }
+      } else {
+        console.warn('[VideoSync] Heartbeat: Socket not open');
+      }
+    }, this.heartbeatTimer);
+  }
+
+  /**
+   * Stop heartbeat
+   */
+  stopHeartbeat() {
+    if (this.heartbeatInterval) {
+      clearInterval(this.heartbeatInterval);
+      this.heartbeatInterval = null;
+      console.log('[VideoSync] Heartbeat stopped');
+    }
+  }
+
+  /**
+   * Schedule a reconnection attempt
+   */
+  scheduleReconnect() {
+    if (this.isReconnecting) {
+      console.log('[VideoSync] Reconnection already scheduled');
+      return;
+    }
+
+    if (this.reconnectAttempts >= this.maxReconnectAttempts) {
+      this.log('Max reconnection attempts reached', 'error');
+      this.isReconnecting = false;
+      return;
+    }
+
+    this.isReconnecting = true;
+    this.reconnectAttempts++;
+
+    // Exponential backoff: 2s, 4s, 8s, 16s, max 30s
+    const delay = Math.min(this.reconnectDelay * Math.pow(2, this.reconnectAttempts - 1), 30000);
+
+    console.log(`[VideoSync] Scheduling reconnect attempt ${this.reconnectAttempts}/${this.maxReconnectAttempts} in ${delay}ms`);
+    this.log(`Reconnecting in ${Math.round(delay / 1000)}s... (${this.reconnectAttempts}/${this.maxReconnectAttempts})`, 'warning');
+
+    this.reconnectTimer = setTimeout(() => {
+      console.log('[VideoSync] Attempting reconnection...');
+      this.reconnect();
+    }, delay);
+  }
+
+  /**
+   * Attempt to reconnect
+   */
+  async reconnect() {
+    if (!this.roomId || !this.lastServerUrl || !this.lastApiKey) {
+      console.error('[VideoSync] Cannot reconnect: missing connection details');
+      this.isReconnecting = false;
+      return;
+    }
+
+    console.log('[VideoSync] Reconnecting to room:', this.roomId);
+    this.log('Reconnecting...', 'warning');
+
+    try {
+      // Close existing socket if any
+      if (this.socket) {
+        this.socket.close();
+        this.socket = null;
+      }
+
+      // Reconnect
+      await this.connect(this.lastServerUrl, this.roomId, this.lastApiKey);
+    } catch (error) {
+      console.error('[VideoSync] Reconnection failed:', error);
+      this.log('Reconnection failed', 'error');
+
+      // Schedule another attempt
+      this.scheduleReconnect();
+    }
   }
 
   updateStatus(status) {

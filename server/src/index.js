@@ -161,8 +161,14 @@ wss.on('connection', (ws) => {
         break;
 
       case 'ping':
-        // Simple keepalive ping (optional, for monitoring)
-        updateRoomActivity(roomId);
+        // Respond to keepalive ping with pong
+        if (roomId) {
+          updateRoomActivity(roomId);
+        }
+        ws.send(JSON.stringify({
+          type: 'pong',
+          timestamp: Date.now()
+        }));
         break;
 
       case 'leave-room':
