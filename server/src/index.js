@@ -9,8 +9,14 @@ const ROOM_INACTIVE_TIMEOUT = 10 * 60 * 1000; // 10 minutes
 
 console.log('[Server] API_KEY loaded:', API_KEY ? '✓ (set)' : '✗ (using default)');
 
-// Store rooms with user IDs and last activity
-// Structure: roomId => { users: Set<userId>, lastActivity: timestamp, connections: Map<userId, ws> }
+// Store rooms with user IDs, last activity, and room metadata
+// Structure: roomId => {
+//   users: Set<userId>,
+//   userNames: Map<userId, username>,
+//   lastActivity: timestamp,
+//   connections: Map<userId, ws>,
+//   metadata: { url, title, platform, createdAt, creatorUserId }
+// }
 const rooms = new Map();
 
 // Create HTTP server for health checks
@@ -116,7 +122,18 @@ wss.on('connection', (ws) => {
 
         clientUserId = userId;
         clientRoom = roomId;
-        joinRoom(ws, roomId, userId);
+        joinRoom(ws, roomId, userId, message.metadata);
+        break;
+
+      case 'get-room-info':
+        if (!isAuthenticated) {
+          ws.send(JSON.stringify({
+            type: 'error',
+            message: 'Not authenticated'
+          }));
+          return;
+        }
+        sendRoomInfo(ws, roomId);
         break;
 
       case 'sync-event':
@@ -184,18 +201,30 @@ wss.on('connection', (ws) => {
     }
   }
 
-  function joinRoom(ws, roomId, userId) {
+  function joinRoom(ws, roomId, userId, metadata) {
     // Create room if it doesn't exist
     if (!rooms.has(roomId)) {
       rooms.set(roomId, {
         users: new Set(),
+        userNames: new Map(),
         lastActivity: Date.now(),
-        connections: new Map()
+        connections: new Map(),
+        metadata: metadata || null
       });
-      console.log('[Server] Room created:', roomId);
+      console.log('[Server] Room created:', roomId, metadata ? 'with metadata' : 'without metadata');
     }
 
     const room = rooms.get(roomId);
+
+    // If this is the first user and metadata is provided, save it
+    if (room.users.size === 0 && metadata) {
+      room.metadata = {
+        ...metadata,
+        creatorUserId: userId,
+        createdAt: Date.now()
+      };
+      console.log('[Server] Room metadata set:', room.metadata);
+    }
 
     // Add user to room if not already there
     if (!room.users.has(userId)) {
@@ -205,30 +234,73 @@ wss.on('connection', (ws) => {
       console.log(`[Server] User ${userId} reconnected to room ${roomId}`);
     }
 
+    // Store username if provided in metadata
+    if (metadata && metadata.username) {
+      room.userNames.set(userId, metadata.username);
+      console.log(`[Server] Stored username for ${userId}: ${metadata.username}`);
+    }
+
     // Store active connection
     room.connections.set(userId, ws);
     room.lastActivity = Date.now();
 
     const userCount = room.users.size;
 
-    // Notify user they joined
+    // Build user list with names
+    const users = Array.from(room.users).map(uid => ({
+      userId: uid,
+      username: room.userNames.get(uid) || 'Anonymous',
+      isCreator: uid === room.metadata?.creatorUserId
+    }));
+
+    console.log(`[Server] Built user list for room ${roomId}:`, users);
+
+    // Notify user they joined with room metadata
     ws.send(JSON.stringify({
       type: 'room-joined',
       roomId: roomId,
-      userCount: userCount
+      userCount: userCount,
+      users: users,
+      metadata: room.metadata
     }));
 
-    // Broadcast user count to all users in room
+    console.log(`[Server] Sent room-joined to ${userId} with ${users.length} users`);
+
+    // Broadcast updated user list to all users in room
     broadcastToRoom(roomId, null, {
-      type: 'user-count',
-      count: userCount
+      type: 'user-list',
+      count: userCount,
+      users: users
     });
+
+    console.log(`[Server] Broadcasted user-list to room ${roomId} with ${users.length} users`);
+  }
+
+  function sendRoomInfo(ws, roomId) {
+    if (!rooms.has(roomId)) {
+      ws.send(JSON.stringify({
+        type: 'room-info',
+        exists: false,
+        roomId: roomId
+      }));
+      return;
+    }
+
+    const room = rooms.get(roomId);
+    ws.send(JSON.stringify({
+      type: 'room-info',
+      exists: true,
+      roomId: roomId,
+      userCount: room.users.size,
+      metadata: room.metadata
+    }));
   }
 
   function leaveRoom(userId, roomId) {
     if (rooms.has(roomId)) {
       const room = rooms.get(roomId);
       room.users.delete(userId);
+      room.userNames.delete(userId);
       room.connections.delete(userId);
 
       const userCount = room.users.size;
@@ -239,10 +311,18 @@ wss.on('connection', (ws) => {
         rooms.delete(roomId);
         console.log('[Server] Room deleted:', roomId);
       } else {
-        // Notify remaining users
+        // Build updated user list
+        const users = Array.from(room.users).map(uid => ({
+          userId: uid,
+          username: room.userNames.get(uid) || 'Anonymous',
+          isCreator: uid === room.metadata?.creatorUserId
+        }));
+
+        // Notify remaining users with updated list
         broadcastToRoom(roomId, null, {
-          type: 'user-count',
-          count: userCount
+          type: 'user-list',
+          count: userCount,
+          users: users
         });
       }
     }

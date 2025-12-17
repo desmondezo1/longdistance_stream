@@ -41,6 +41,10 @@ class VideoSyncUI {
     // Storage cleanup heartbeat
     this.storageHeartbeat = null;
 
+    // Pending room join info
+    this.pendingRoomCode = null;
+    this.pendingRoomInfo = null;
+
     // Setup cleanup on page unload
     window.addEventListener('beforeunload', () => this.cleanupOnClose());
 
@@ -97,6 +101,45 @@ class VideoSyncUI {
 
     // Check if we should auto-reconnect
     if (config.connectionState) {
+      // Check if this is a pending join after URL navigation
+      if (config.connectionState.pendingJoin) {
+        const currentUrl = window.location.href;
+        const expectedUrl = config.connectionState.videoUrl;
+
+        // Verify we're on the correct URL before auto-joining
+        if (currentUrl === expectedUrl) {
+          // Show a brief notification
+          this.showNavigationNotification('Joining room after navigation...');
+
+          // Auto-join immediately after navigation
+          this.log('Resuming room join after navigation...', 'info');
+          this.roomId = config.connectionState.roomId;
+
+          // Remove the pendingJoin flag
+          await this.saveConnectionState({
+            ...config.connectionState,
+            pendingJoin: false
+          });
+
+          // Connect to the room
+          this.connect(
+            config.connectionState.serverUrl,
+            config.connectionState.roomId,
+            config.connectionState.apiKey
+          );
+          return;
+        } else {
+          // Wrong URL - clear the pending join and show prompt instead
+          this.log('Navigation URL mismatch - showing resume prompt', 'warning');
+          await this.saveConnectionState({
+            ...config.connectionState,
+            pendingJoin: false
+          });
+          this.showResumePrompt(config.connectionState);
+          return;
+        }
+      }
+
       const shouldResume = this.shouldAutoReconnect(config.connectionState);
 
       if (shouldResume === true) {
@@ -721,6 +764,39 @@ class VideoSyncUI {
         .videosync-log-entry.error {
           color: #f44336;
         }
+
+        .videosync-users-container {
+          display: flex;
+          flex-wrap: wrap;
+          gap: 6px;
+          margin-top: 6px;
+        }
+
+        .videosync-user-pill {
+          background: #333;
+          color: #fff;
+          padding: 6px 12px;
+          border-radius: 12px;
+          font-size: 12px;
+          display: inline-flex;
+          align-items: center;
+          gap: 6px;
+        }
+
+        .videosync-user-pill.creator {
+          background: #0066ff;
+        }
+
+        .videosync-user-pill.you {
+          background: #4CAF50;
+        }
+
+        .videosync-user-pill .user-icon {
+          width: 8px;
+          height: 8px;
+          border-radius: 50%;
+          background: currentColor;
+        }
       </style>
 
       <div class="videosync-panel">
@@ -756,17 +832,51 @@ class VideoSyncUI {
               <div class="videosync-label">Room Code</div>
               <input type="text" class="videosync-input" id="vs-room-code-input" placeholder="Enter 6-character code" maxlength="6">
             </div>
-            <button class="videosync-button" id="vs-join-submit">Join Room</button>
+            <button class="videosync-button" id="vs-join-submit">Check Room</button>
             <button class="videosync-button secondary" id="vs-join-cancel">Cancel</button>
+          </div>
+
+          <div id="vs-join-preview" style="display: none;">
+            <div class="videosync-section">
+              <div class="videosync-label">Room Preview</div>
+              <div style="background: #222; padding: 12px; border-radius: 6px; margin-bottom: 12px;">
+                <div style="margin-bottom: 8px;">
+                  <span style="color: #888; font-size: 11px;">PLATFORM</span>
+                  <div id="vs-preview-platform" style="color: #fff; font-size: 14px;">Loading...</div>
+                </div>
+                <div style="margin-bottom: 8px;">
+                  <span style="color: #888; font-size: 11px;">WATCHING</span>
+                  <div id="vs-preview-title" style="color: #fff; font-size: 14px;">Loading...</div>
+                </div>
+                <div>
+                  <span style="color: #888; font-size: 11px;">USERS IN ROOM</span>
+                  <div id="vs-preview-users" style="color: #fff; font-size: 14px;">Loading...</div>
+                </div>
+              </div>
+              <div id="vs-preview-url-warning" style="display: none; background: #444; padding: 10px; border-radius: 6px; margin-bottom: 12px; font-size: 12px; color: #ffa500;">
+                ⚠️ You'll be navigated to the room's video page
+              </div>
+            </div>
+            <button class="videosync-button" id="vs-join-confirm">Join Room</button>
+            <button class="videosync-button secondary" id="vs-join-preview-cancel">Cancel</button>
           </div>
 
           <div id="vs-connected" style="display: none;">
             <div class="videosync-room-code" id="vs-room-code" title="Click to copy">
               ------
             </div>
+            <div style="background: #222; padding: 8px; border-radius: 6px; margin-bottom: 12px; font-size: 12px;">
+              <span style="color: #888;">Logged in as:</span> <span id="vs-current-username" style="color: #4CAF50; font-weight: 600;">Guest</span>
+            </div>
             <div class="videosync-info">
               <span>Users: <span id="vs-user-count">1</span></span>
               <span id="vs-sync-status">Syncing...</span>
+            </div>
+            <div class="videosync-section">
+              <div class="videosync-label">Connected Users</div>
+              <div id="vs-users-container" class="videosync-users-container">
+                <div class="videosync-user-pill">You</div>
+              </div>
             </div>
             <button class="videosync-button secondary" id="vs-disconnect">Leave Room</button>
             <div class="videosync-log" id="vs-log"></div>
@@ -832,12 +942,57 @@ class VideoSyncUI {
         return;
       }
 
-      const config = await this.loadConfig();
-      await this.connect(config.serverUrl, roomCode, config.apiKey);
+      // Check room info first before joining
+      await this.checkRoomInfo(roomCode);
     });
 
     document.getElementById('vs-join-cancel').addEventListener('click', () => {
       this.showScreen('menu');
+    });
+
+    document.getElementById('vs-join-confirm').addEventListener('click', async () => {
+      const roomCode = this.pendingRoomCode;
+      const roomInfo = this.pendingRoomInfo;
+
+      if (!roomCode || !roomInfo) {
+        alert('Room information not available');
+        return;
+      }
+
+      const config = await this.loadConfig();
+
+      // Check if we need to navigate to different URL
+      if (roomInfo.metadata && roomInfo.metadata.url) {
+        const currentUrl = window.location.href;
+        if (currentUrl !== roomInfo.metadata.url) {
+          // Store the room join intent before navigation
+          // This will be picked up after the page reloads
+          await this.saveConnectionState({
+            serverUrl: config.serverUrl,
+            roomId: roomCode,
+            apiKey: config.apiKey,
+            username: this.username,
+            platform: roomInfo.metadata.platform,
+            videoUrl: roomInfo.metadata.url,
+            timestamp: Date.now(),
+            pendingJoin: true // Mark this as a pending join after navigation
+          });
+
+          // Navigate to the room's URL
+          this.log('Navigating to room video...', 'info');
+          window.location.href = roomInfo.metadata.url;
+          return; // Navigation will reload the page
+        }
+      }
+
+      // Same URL, just connect
+      await this.connect(config.serverUrl, roomCode, config.apiKey);
+    });
+
+    document.getElementById('vs-join-preview-cancel').addEventListener('click', () => {
+      this.pendingRoomCode = null;
+      this.pendingRoomInfo = null;
+      this.showScreen('join-input');
     });
 
     // Disconnect
@@ -860,6 +1015,78 @@ class VideoSyncUI {
     this.makeDraggable();
   }
 
+  async checkRoomInfo(roomCode) {
+    this.log('Checking room info...', 'info');
+
+    const config = await this.loadConfig();
+
+    // Create temporary WebSocket connection to check room info
+    const tempSocket = new WebSocket(config.serverUrl);
+
+    tempSocket.onopen = () => {
+      // Authenticate
+      tempSocket.send(JSON.stringify({
+        type: 'authenticate',
+        apiKey: config.apiKey
+      }));
+    };
+
+    tempSocket.onmessage = (event) => {
+      const message = JSON.parse(event.data);
+
+      if (message.type === 'authenticated' && message.success) {
+        // Request room info
+        tempSocket.send(JSON.stringify({
+          type: 'get-room-info',
+          roomId: roomCode
+        }));
+      } else if (message.type === 'room-info') {
+        tempSocket.close();
+
+        if (!message.exists) {
+          alert('Room not found. Please check the room code.');
+          return;
+        }
+
+        // Store pending room info
+        this.pendingRoomCode = roomCode;
+        this.pendingRoomInfo = message;
+
+        // Show preview
+        this.showRoomPreview(message);
+      }
+    };
+
+    tempSocket.onerror = (error) => {
+      console.error('[VideoSync] Error checking room:', error);
+      this.log('Error checking room', 'error');
+      alert('Failed to check room. Please try again.');
+    };
+  }
+
+  showRoomPreview(roomInfo) {
+    const platform = roomInfo.metadata?.platform || 'Unknown';
+    const title = roomInfo.metadata?.title || 'Unknown video';
+    const userCount = roomInfo.userCount || 0;
+    const roomUrl = roomInfo.metadata?.url || '';
+    const currentUrl = window.location.href;
+
+    // Update preview UI
+    document.getElementById('vs-preview-platform').textContent = platform.charAt(0).toUpperCase() + platform.slice(1);
+    document.getElementById('vs-preview-title').textContent = title;
+    document.getElementById('vs-preview-users').textContent = userCount;
+
+    // Show URL warning if different
+    if (roomUrl && currentUrl !== roomUrl) {
+      document.getElementById('vs-preview-url-warning').style.display = 'block';
+    } else {
+      document.getElementById('vs-preview-url-warning').style.display = 'none';
+    }
+
+    this.log('Room preview loaded', 'success');
+    this.showScreen('join-preview');
+  }
+
   async showScreen(screen = null) {
     const config = await this.loadConfig();
 
@@ -867,6 +1094,7 @@ class VideoSyncUI {
     document.getElementById('vs-setup').style.display = 'none';
     document.getElementById('vs-menu').style.display = 'none';
     document.getElementById('vs-join-input').style.display = 'none';
+    document.getElementById('vs-join-preview').style.display = 'none';
     document.getElementById('vs-connected').style.display = 'none';
 
     // Determine which screen to show
@@ -944,6 +1172,9 @@ class VideoSyncUI {
           type: 'authenticate',
           apiKey: apiKey
         }));
+
+        // Store reference to send join-room after authentication
+        this.pendingJoinRoomId = roomId;
       };
 
       this.socket.onmessage = (event) => {
@@ -994,10 +1225,20 @@ class VideoSyncUI {
       case 'authenticated':
         if (message.success) {
           this.log('Authenticated', 'success');
+
+          // Prepare room metadata (for room creators)
+          const metadata = {
+            url: window.location.href,
+            title: document.title,
+            platform: this.detectPlatform(),
+            username: this.username // Include username
+          };
+
           this.socket.send(JSON.stringify({
             type: 'join-room',
-            roomId: this.roomId,
-            userId: this.userId
+            roomId: this.pendingJoinRoomId || this.roomId,
+            userId: this.userId,
+            metadata: metadata
           }));
         }
         break;
@@ -1005,14 +1246,43 @@ class VideoSyncUI {
       case 'room-joined':
         this.log(`Joined room ${message.roomId}`, 'success');
         this.updateStatus('connected');
+
+        // Ensure roomId is set before showing the screen
+        this.roomId = message.roomId;
+
+        // Update the room code display explicitly
+        const roomCodeEl = document.getElementById('vs-room-code');
+        if (roomCodeEl) {
+          roomCodeEl.textContent = this.roomId;
+          console.log('[VideoSync UI] Room code updated:', this.roomId);
+        }
+
+        // Update username display
+        const usernameEl = document.getElementById('vs-current-username');
+        if (usernameEl && this.username) {
+          usernameEl.textContent = this.username;
+        }
+
         this.showScreen('connected');
         if (message.userCount) {
           this.updateUserCount(message.userCount);
+        }
+
+        // Update user list if provided
+        if (message.users) {
+          this.updateUserList(message.users);
         }
         break;
 
       case 'user-count':
         this.updateUserCount(message.count);
+        break;
+
+      case 'user-list':
+        this.updateUserCount(message.count);
+        if (message.users) {
+          this.updateUserList(message.users);
+        }
         break;
 
       case 'remote-event':
@@ -1194,6 +1464,34 @@ class VideoSyncUI {
       notification.style.animation = 'slideIn 0.3s ease-out reverse';
       setTimeout(() => notification.remove(), 300);
     }, 2000);
+  }
+
+  showNavigationNotification(message) {
+    // Show notification for post-navigation auto-join
+    const notification = document.createElement('div');
+    notification.style.cssText = `
+      position: fixed;
+      top: 80px;
+      right: 20px;
+      background: rgba(0, 122, 255, 0.95);
+      color: white;
+      padding: 12px 20px;
+      border-radius: 8px;
+      font-family: Arial, sans-serif;
+      font-size: 14px;
+      z-index: 999998;
+      box-shadow: 0 4px 12px rgba(0,0,0,0.5);
+      animation: slideIn 0.3s ease-out;
+    `;
+
+    notification.textContent = message;
+    document.body.appendChild(notification);
+
+    // Remove after 3 seconds
+    setTimeout(() => {
+      notification.style.animation = 'slideIn 0.3s ease-out reverse';
+      setTimeout(() => notification.remove(), 300);
+    }, 3000);
   }
 
   /**
@@ -1414,6 +1712,72 @@ class VideoSyncUI {
     const el = document.getElementById('vs-user-count');
     if (el) el.textContent = count;
     this.log(`Users in room: ${count}`);
+  }
+
+  updateUserList(users) {
+    const container = document.getElementById('vs-users-container');
+    if (!container) {
+      console.warn('[VideoSync UI] User container not found');
+      return;
+    }
+
+    console.log('[VideoSync UI] Updating user list with', users.length, 'users:', users);
+    console.log('[VideoSync UI] Current userId:', this.userId);
+
+    // Clear existing pills
+    container.innerHTML = '';
+
+    if (!users || users.length === 0) {
+      console.warn('[VideoSync UI] No users to display');
+      return;
+    }
+
+    // Sort users: creator first, then current user, then others
+    const sortedUsers = users.sort((a, b) => {
+      if (a.isCreator) return -1;
+      if (b.isCreator) return 1;
+      if (a.userId === this.userId) return -1;
+      if (b.userId === this.userId) return 1;
+      return 0;
+    });
+
+    console.log('[VideoSync UI] Sorted users:', sortedUsers);
+
+    // Create pills for each user
+    sortedUsers.forEach(user => {
+      console.log('[VideoSync UI] Creating pill for user:', user);
+
+      const pill = document.createElement('div');
+      pill.className = 'videosync-user-pill';
+
+      // Add special classes
+      if (user.userId === this.userId) {
+        pill.classList.add('you');
+        console.log('[VideoSync UI] Added "you" class to pill');
+      } else if (user.isCreator) {
+        pill.classList.add('creator');
+        console.log('[VideoSync UI] Added "creator" class to pill');
+      }
+
+      // Add icon
+      const icon = document.createElement('div');
+      icon.className = 'user-icon';
+      pill.appendChild(icon);
+
+      // Add username
+      let displayName = user.username;
+      if (user.userId === this.userId) {
+        displayName += ' (You)';
+      } else if (user.isCreator) {
+        displayName += ' 👑';
+      }
+
+      pill.appendChild(document.createTextNode(displayName));
+      container.appendChild(pill);
+      console.log('[VideoSync UI] Added pill for', displayName, 'to container');
+    });
+
+    console.log('[VideoSync UI] User list updated. Container now has', container.children.length, 'pills');
   }
 
   log(message, type = 'info') {
