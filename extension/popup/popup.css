@@ -14,11 +14,18 @@ body {
   padding: 16px;
 }
 
+/* Header with settings icon */
+.header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 16px;
+}
+
 h1 {
   font-size: 20px;
   color: #333;
-  margin-bottom: 16px;
-  text-align: center;
+  margin: 0;
 }
 
 h3 {
@@ -27,6 +34,25 @@ h3 {
   margin-bottom: 8px;
 }
 
+.icon-btn {
+  background: none;
+  border: none;
+  cursor: pointer;
+  padding: 6px;
+  border-radius: 4px;
+  color: #666;
+  transition: all 0.2s;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.icon-btn:hover {
+  background: #e9ecef;
+  color: #333;
+}
+
+/* Status indicator */
 .status {
   display: flex;
   align-items: center;
@@ -49,6 +75,16 @@ h3 {
   background: #28a745;
 }
 
+/* Screen management */
+.screen {
+  display: block;
+}
+
+.screen.hidden {
+  display: none;
+}
+
+/* Sections */
 .section {
   background: white;
   padding: 12px;
@@ -60,7 +96,9 @@ h3 {
   display: none;
 }
 
-input[type="text"] {
+/* Form elements */
+input[type="text"],
+input[type="password"] {
   width: 100%;
   padding: 8px 12px;
   border: 1px solid #ddd;
@@ -69,11 +107,13 @@ input[type="text"] {
   margin-bottom: 8px;
 }
 
-input[type="text"]:focus {
+input[type="text"]:focus,
+input[type="password"]:focus {
   outline: none;
   border-color: #007bff;
 }
 
+/* Buttons */
 .btn {
   width: 100%;
   padding: 10px;
@@ -88,6 +128,10 @@ input[type="text"]:focus {
 
 .btn:hover {
   opacity: 0.9;
+}
+
+.btn:last-child {
+  margin-bottom: 0;
 }
 
 .btn-primary {
@@ -105,40 +149,178 @@ input[type="text"]:focus {
   color: white;
 }
 
-.btn-small {
-  padding: 4px 8px;
-  font-size: 11px;
-  background: #007bff;
-  color: white;
-  border: none;
-  border-radius: 3px;
-  cursor: pointer;
-  margin-left: 8px;
-}
-
-.room-code {
-  padding: 8px;
-  background: #f8f9fa;
-  border-radius: 4px;
-  margin-bottom: 8px;
-  font-size: 13px;
-}
-
-.users-count {
+/* Setup screen */
+.setup-description {
   font-size: 12px;
   color: #666;
-  margin-bottom: 8px;
+  margin-bottom: 12px;
+  line-height: 1.4;
 }
 
-label {
+/* Room code display (creator view) */
+.room-code-display {
+  text-align: center;
+  margin-bottom: 12px;
+}
+
+.room-code-large {
+  font-size: 32px;
+  font-weight: 700;
+  color: #007bff;
+  letter-spacing: 4px;
+  padding: 16px;
+  background: #f8f9fa;
+  border-radius: 8px;
+  margin-bottom: 12px;
+  font-family: 'Courier New', monospace;
+}
+
+.room-description {
+  font-size: 12px;
+  color: #666;
+  text-align: center;
+  line-height: 1.4;
+  margin: 0;
+}
+
+.connection-success {
+  font-size: 13px;
+  color: #28a745;
+  text-align: center;
+  margin: 0;
+  padding: 4px 0;
+}
+
+/* Users list */
+.users-list {
+  max-height: 200px;
+  overflow-y: auto;
+}
+
+.user-item {
+  padding: 8px 12px;
+  background: #f8f9fa;
+  border-radius: 4px;
+  font-size: 13px;
+  margin-bottom: 6px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.user-item:last-child {
+  margin-bottom: 0;
+}
+
+.user-item::before {
+  content: '•';
+  color: #28a745;
+  font-size: 16px;
+  font-weight: bold;
+}
+
+/* Settings Modal */
+.modal {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  background: rgba(0, 0, 0, 0.5);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+}
+
+.modal.hidden {
+  display: none;
+}
+
+.modal-content {
+  background: white;
+  border-radius: 8px;
+  width: 90%;
+  max-width: 320px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+}
+
+.modal-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 12px 16px;
+  border-bottom: 1px solid #e9ecef;
+}
+
+.modal-header h3 {
+  margin: 0;
+  font-size: 16px;
+  color: #333;
+}
+
+.close-btn {
+  background: none;
+  border: none;
+  font-size: 24px;
+  color: #999;
+  cursor: pointer;
+  padding: 0;
+  width: 24px;
+  height: 24px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  line-height: 1;
+}
+
+.close-btn:hover {
+  color: #333;
+}
+
+.modal-body {
+  padding: 16px;
+}
+
+.modal-body label {
+  display: block;
+  font-size: 12px;
+  color: #666;
+  margin-bottom: 4px;
+  font-weight: 500;
+}
+
+.modal-body input[type="text"],
+.modal-body input[type="password"] {
+  margin-bottom: 12px;
+}
+
+.checkbox-label {
   display: flex;
   align-items: center;
   gap: 8px;
   font-size: 13px;
   color: #333;
   cursor: pointer;
+  margin-top: 8px;
+}
+
+.modal-footer {
+  display: flex;
+  gap: 8px;
+  padding: 12px 16px;
+  border-top: 1px solid #e9ecef;
+}
+
+.modal-footer .btn {
+  margin-bottom: 0;
 }
 
 input[type="checkbox"] {
   cursor: pointer;
+}
+
+/* Hidden class */
+.hidden {
+  display: none;
 }

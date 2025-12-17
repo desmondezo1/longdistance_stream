@@ -1,9 +1,16 @@
+require('dotenv').config();
 const WebSocket = require('ws');
 const http = require('http');
 
 const PORT = process.env.PORT || 3000;
+const API_KEY = process.env.API_KEY || 'your-secret-api-key-change-this';
+const ROOM_CLEANUP_INTERVAL = 5 * 60 * 1000; // 5 minutes
+const ROOM_INACTIVE_TIMEOUT = 10 * 60 * 1000; // 10 minutes
 
-// Store rooms and their users
+console.log('[Server] API_KEY loaded:', API_KEY ? '✓ (set)' : '✗ (using default)');
+
+// Store rooms with user IDs and last activity
+// Structure: roomId => { users: Set<userId>, lastActivity: timestamp, connections: Map<userId, ws> }
 const rooms = new Map();
 
 // Create HTTP server for health checks
@@ -28,10 +35,23 @@ wss.on('connection', (ws) => {
   console.log('[Server] New client connected');
 
   let clientRoom = null;
+  let clientUserId = null;
+  let isAuthenticated = false;
 
   ws.on('message', (message) => {
     try {
       const data = JSON.parse(message);
+
+      // First message must be authentication
+      if (!isAuthenticated && data.type !== 'authenticate') {
+        ws.send(JSON.stringify({
+          type: 'error',
+          message: 'Authentication required. Send authenticate message first.'
+        }));
+        ws.close();
+        return;
+      }
+
       handleMessage(ws, data);
     } catch (err) {
       console.error('[Server] Failed to parse message:', err);
@@ -41,8 +61,14 @@ wss.on('connection', (ws) => {
   ws.on('close', () => {
     console.log('[Server] Client disconnected');
 
-    if (clientRoom) {
-      leaveRoom(ws, clientRoom);
+    // Don't remove user from room on disconnect - they might reconnect
+    // Just remove their active connection
+    if (clientRoom && clientUserId && rooms.has(clientRoom)) {
+      const room = rooms.get(clientRoom);
+      if (room.connections.has(clientUserId)) {
+        room.connections.delete(clientUserId);
+        console.log(`[Server] Removed active connection for user ${clientUserId} in room ${clientRoom}`);
+      }
     }
   });
 
@@ -51,28 +77,100 @@ wss.on('connection', (ws) => {
   });
 
   function handleMessage(ws, message) {
-    const { type, roomId, data } = message;
+    const { type, roomId, data, apiKey, userId } = message;
 
     switch (type) {
+      case 'authenticate':
+        if (apiKey === API_KEY) {
+          isAuthenticated = true;
+          ws.send(JSON.stringify({
+            type: 'authenticated',
+            success: true
+          }));
+          console.log('[Server] Client authenticated');
+        } else {
+          ws.send(JSON.stringify({
+            type: 'error',
+            message: 'Invalid API key'
+          }));
+          ws.close();
+          console.log('[Server] Client failed authentication');
+        }
+        break;
+
       case 'join-room':
-        joinRoom(ws, roomId);
+        if (!isAuthenticated) {
+          ws.send(JSON.stringify({
+            type: 'error',
+            message: 'Not authenticated'
+          }));
+          return;
+        }
+        if (!userId) {
+          ws.send(JSON.stringify({
+            type: 'error',
+            message: 'userId required for join-room'
+          }));
+          return;
+        }
+
+        clientUserId = userId;
         clientRoom = roomId;
+        joinRoom(ws, roomId, userId);
         break;
 
       case 'sync-event':
+        if (!isAuthenticated) return;
+        if (!clientRoom) return;
+
+        // Update room activity
+        updateRoomActivity(roomId);
+
         // Broadcast sync event to all other users in the room
-        broadcastToRoom(roomId, ws, {
+        broadcastToRoom(roomId, userId, {
           type: 'remote-event',
           data: data
         });
         break;
 
       case 'request-sync':
-        // Request sync state from other user
-        broadcastToRoom(roomId, ws, {
+        if (!isAuthenticated) return;
+        if (!clientRoom) return;
+
+        // Update room activity
+        updateRoomActivity(roomId);
+
+        // Broadcast to other users asking for their state
+        broadcastToRoom(roomId, userId, {
           type: 'sync-request',
+          data: data,
+          requesterId: userId
+        });
+        break;
+
+      case 'sync-response':
+        if (!isAuthenticated) return;
+        if (!clientRoom) return;
+
+        // Send sync response to the requester
+        const targetUserId = data.targetUserId;
+        sendToUser(roomId, targetUserId, {
+          type: 'sync-state',
           data: data
         });
+        break;
+
+      case 'ping':
+        // Simple keepalive ping (optional, for monitoring)
+        updateRoomActivity(roomId);
+        break;
+
+      case 'leave-room':
+        if (clientRoom && clientUserId) {
+          leaveRoom(clientUserId, clientRoom);
+          clientRoom = null;
+          clientUserId = null;
+        }
         break;
 
       default:
@@ -80,24 +178,38 @@ wss.on('connection', (ws) => {
     }
   }
 
-  function joinRoom(ws, roomId) {
+  function joinRoom(ws, roomId, userId) {
     // Create room if it doesn't exist
     if (!rooms.has(roomId)) {
-      rooms.set(roomId, new Set());
+      rooms.set(roomId, {
+        users: new Set(),
+        lastActivity: Date.now(),
+        connections: new Map()
+      });
       console.log('[Server] Room created:', roomId);
     }
 
-    // Add user to room
-    rooms.get(roomId).add(ws);
-    ws.roomId = roomId;
+    const room = rooms.get(roomId);
 
-    const userCount = rooms.get(roomId).size;
-    console.log(`[Server] User joined room ${roomId} (${userCount} users)`);
+    // Add user to room if not already there
+    if (!room.users.has(userId)) {
+      room.users.add(userId);
+      console.log(`[Server] User ${userId} joined room ${roomId} (${room.users.size} users)`);
+    } else {
+      console.log(`[Server] User ${userId} reconnected to room ${roomId}`);
+    }
+
+    // Store active connection
+    room.connections.set(userId, ws);
+    room.lastActivity = Date.now();
+
+    const userCount = room.users.size;
 
     // Notify user they joined
     ws.send(JSON.stringify({
       type: 'room-joined',
-      roomId: roomId
+      roomId: roomId,
+      userCount: userCount
     }));
 
     // Broadcast user count to all users in room
@@ -107,12 +219,14 @@ wss.on('connection', (ws) => {
     });
   }
 
-  function leaveRoom(ws, roomId) {
+  function leaveRoom(userId, roomId) {
     if (rooms.has(roomId)) {
-      rooms.get(roomId).delete(ws);
+      const room = rooms.get(roomId);
+      room.users.delete(userId);
+      room.connections.delete(userId);
 
-      const userCount = rooms.get(roomId).size;
-      console.log(`[Server] User left room ${roomId} (${userCount} users remaining)`);
+      const userCount = room.users.size;
+      console.log(`[Server] User ${userId} left room ${roomId} (${userCount} users remaining)`);
 
       // Remove room if empty
       if (userCount === 0) {
@@ -128,33 +242,106 @@ wss.on('connection', (ws) => {
     }
   }
 
-  function broadcastToRoom(roomId, excludeWs, message) {
+  function updateRoomActivity(roomId) {
+    if (rooms.has(roomId)) {
+      rooms.get(roomId).lastActivity = Date.now();
+    }
+  }
+
+  function broadcastToRoom(roomId, excludeUserId, message) {
     if (!rooms.has(roomId)) return;
 
+    const room = rooms.get(roomId);
     const messageStr = JSON.stringify(message);
 
-    rooms.get(roomId).forEach((client) => {
+    room.connections.forEach((client, userId) => {
       // Don't send to the sender or to disconnected clients
-      if (client !== excludeWs && client.readyState === WebSocket.OPEN) {
-        client.send(messageStr);
+      if (userId !== excludeUserId && client.readyState === WebSocket.OPEN) {
+        try {
+          client.send(messageStr);
+        } catch (err) {
+          console.error(`[Server] Error sending to user ${userId}:`, err.message);
+        }
       }
     });
   }
+
+  function sendToUser(roomId, targetUserId, message) {
+    if (!rooms.has(roomId)) return;
+
+    const room = rooms.get(roomId);
+    const client = room.connections.get(targetUserId);
+
+    if (client && client.readyState === WebSocket.OPEN) {
+      try {
+        client.send(JSON.stringify(message));
+      } catch (err) {
+        console.error(`[Server] Error sending to user ${targetUserId}:`, err.message);
+      }
+    }
+  }
 });
+
+// Clean up inactive rooms periodically
+setInterval(() => {
+  const now = Date.now();
+  const roomsToDelete = [];
+
+  rooms.forEach((room, roomId) => {
+    const inactiveTime = now - room.lastActivity;
+    if (inactiveTime > ROOM_INACTIVE_TIMEOUT) {
+      roomsToDelete.push(roomId);
+    }
+  });
+
+  roomsToDelete.forEach(roomId => {
+    rooms.delete(roomId);
+    console.log(`[Server] Cleaned up inactive room: ${roomId}`);
+  });
+
+  if (roomsToDelete.length > 0) {
+    console.log(`[Server] Cleaned up ${roomsToDelete.length} inactive rooms`);
+  }
+}, ROOM_CLEANUP_INTERVAL);
 
 // Graceful shutdown
-process.on('SIGTERM', () => {
-  console.log('[Server] SIGTERM received, closing server...');
-  wss.close(() => {
-    console.log('[Server] Server closed');
-    process.exit(0);
-  });
-});
+let isShuttingDown = false;
 
-process.on('SIGINT', () => {
-  console.log('[Server] SIGINT received, closing server...');
-  wss.close(() => {
-    console.log('[Server] Server closed');
+function shutdown(signal) {
+  if (isShuttingDown) return;
+  isShuttingDown = true;
+
+  console.log(`[Server] ${signal} received, closing server...`);
+
+  // Set a shorter timeout for force exit
+  const forceExitTimer = setTimeout(() => {
+    console.error('[Server] Forced shutdown after timeout');
+    process.exit(1);
+  }, 3000).unref(); // unref() allows process to exit even if timer is pending
+
+  // Close the HTTP server (stops accepting new connections)
+  server.close((err) => {
+    if (err) console.error('[Server] Error closing HTTP server:', err);
+  });
+
+  // Close all WebSocket connections gracefully
+  const clients = Array.from(wss.clients);
+  clients.forEach((client) => {
+    try {
+      client.terminate(); // Use terminate() instead of close() for immediate shutdown
+    } catch (err) {
+      // Ignore errors during shutdown
+    }
+  });
+
+  // Close the WebSocket server
+  wss.close((err) => {
+    if (err) console.error('[Server] Error closing WebSocket server:', err);
+    clearTimeout(forceExitTimer);
+    console.log('[Server] Server closed successfully');
     process.exit(0);
   });
-});
+}
+
+process.once('SIGTERM', () => shutdown('SIGTERM'));
+process.once('SIGINT', () => shutdown('SIGINT'));

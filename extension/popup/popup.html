@@ -7,42 +7,113 @@
 </head>
 <body>
   <div class="container">
-    <h1>Video Sync</h1>
+    <!-- Header with title and settings icon -->
+    <div class="header">
+      <h1>Video Sync</h1>
+      <button id="settings-icon" class="icon-btn hidden" title="Settings">
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <circle cx="12" cy="12" r="3"></circle>
+          <path d="M12 1v6m0 6v6m0-18c-1.5 0-3 .5-4 1.5m4-1.5c1.5 0 3 .5 4 1.5m-4 19.5c-1.5 0-3-.5-4-1.5m4 1.5c1.5 0 3-.5 4-1.5M1 12h6m6 0h6M2.5 8c1-1.5 2.5-3 4-4m11 0c1.5 1 3 2.5 4 4m-19 8c1 1.5 2.5 3 4 4m11 0c1.5-1 3-2.5 4-4"></path>
+        </svg>
+      </button>
+    </div>
 
+    <!-- Status Indicator -->
     <div id="status" class="status">
       <span class="status-indicator"></span>
       <span id="status-text">Disconnected</span>
     </div>
 
-    <div class="section">
-      <h3>Server Settings</h3>
-      <input type="text" id="server-url" placeholder="Server URL (e.g., wss://yourserver.com)" value="wss://your-production-server.com:3000">
-    </div>
-
-    <div class="section">
-      <h3>Join or Create Room</h3>
-      <input type="text" id="room-id" placeholder="Enter room code">
-      <button id="create-room" class="btn btn-primary">Create New Room</button>
-      <button id="join-room" class="btn btn-secondary">Join Room</button>
-    </div>
-
-    <div id="room-info" class="section hidden">
-      <h3>Current Room</h3>
-      <div class="room-code">
-        <strong>Room Code:</strong>
-        <span id="current-room"></span>
-        <button id="copy-room" class="btn-small">Copy</button>
+    <!-- Initial Setup Screen (shown only on first use) -->
+    <div id="setup-screen" class="screen">
+      <div class="section">
+        <h3>Initial Setup</h3>
+        <p class="setup-description">Configure your server connection to get started.</p>
+        <input type="text" id="setup-server-url" placeholder="Server URL (e.g., wss://yourserver.com)" value="wss://your-production-server.com:3000">
+        <input type="password" id="setup-api-key" placeholder="API Key" value="your-secret-api-key-change-this">
+        <button id="save-setup" class="btn btn-primary">Save & Continue</button>
       </div>
-      <p class="users-count">Users in room: <span id="user-count">1</span></p>
-      <button id="leave-room" class="btn btn-danger">Leave Room</button>
     </div>
 
-    <div class="section">
-      <h3>Sync Settings</h3>
-      <label>
-        <input type="checkbox" id="auto-sync" checked>
-        Auto-sync every 5 seconds
-      </label>
+    <!-- Main Menu Screen (after setup) -->
+    <div id="main-menu-screen" class="screen hidden">
+      <div class="section">
+        <h3>What would you like to do?</h3>
+        <button id="create-room" class="btn btn-primary">Create New Room</button>
+        <button id="join-room" class="btn btn-secondary">Join Existing Room</button>
+      </div>
+    </div>
+
+    <!-- Join Room Input Screen -->
+    <div id="join-input-screen" class="screen hidden">
+      <div class="section">
+        <h3>Join Room</h3>
+        <input type="text" id="room-id" placeholder="Enter room code" maxlength="6">
+        <button id="join-room-submit" class="btn btn-primary">Join</button>
+        <button id="join-cancel" class="btn btn-secondary">Cancel</button>
+      </div>
+    </div>
+
+    <!-- Creator Connected Screen -->
+    <div id="creator-screen" class="screen hidden">
+      <div class="section">
+        <h3>Your Room Code</h3>
+        <div class="room-code-display">
+          <div class="room-code-large" id="creator-room-code">ABC123</div>
+          <button id="copy-room-code" class="btn btn-secondary">Copy Code</button>
+        </div>
+        <p class="room-description">Share this code with others to invite them to your room.</p>
+      </div>
+
+      <div class="section">
+        <h3>Connected Users</h3>
+        <div id="creator-users-list" class="users-list">
+          <div class="user-item">You (Host)</div>
+        </div>
+      </div>
+
+      <button id="creator-disconnect" class="btn btn-danger">Disconnect</button>
+    </div>
+
+    <!-- Joiner Connected Screen -->
+    <div id="joiner-screen" class="screen hidden">
+      <div class="section">
+        <h3>Connected to Room</h3>
+        <p class="connection-success">You are now syncing with other users.</p>
+      </div>
+
+      <div class="section">
+        <h3>Connected Users</h3>
+        <div id="joiner-users-list" class="users-list">
+          <div class="user-item">Loading users...</div>
+        </div>
+      </div>
+
+      <button id="joiner-disconnect" class="btn btn-danger">Disconnect</button>
+    </div>
+
+    <!-- Settings Modal -->
+    <div id="settings-modal" class="modal hidden">
+      <div class="modal-content">
+        <div class="modal-header">
+          <h3>Settings</h3>
+          <button id="close-modal" class="close-btn">&times;</button>
+        </div>
+        <div class="modal-body">
+          <label>Server URL</label>
+          <input type="text" id="settings-server-url" placeholder="Server URL">
+          <label>API Key</label>
+          <input type="password" id="settings-api-key" placeholder="API Key">
+          <label class="checkbox-label">
+            <input type="checkbox" id="auto-sync">
+            Auto-sync every 5 seconds
+          </label>
+        </div>
+        <div class="modal-footer">
+          <button id="cancel-settings" class="btn btn-secondary">Cancel</button>
+          <button id="save-settings" class="btn btn-primary">Save Changes</button>
+        </div>
+      </div>
     </div>
   </div>
 

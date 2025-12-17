@@ -7,10 +7,15 @@
     "start": "node src/index.js",
     "dev": "node src/index.js"
   },
-  "keywords": ["video", "sync", "websocket"],
+  "keywords": [
+    "video",
+    "sync",
+    "websocket"
+  ],
   "author": "",
   "license": "MIT",
   "dependencies": {
+    "dotenv": "^17.2.3",
     "ws": "^8.18.0"
   }
 }

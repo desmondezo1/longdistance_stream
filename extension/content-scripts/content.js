@@ -93,20 +93,33 @@ function attachListeners() {
 
 // Send event to background script
 function sendEvent(eventData) {
-  chrome.runtime.sendMessage({
-    type: 'SYNC_EVENT',
-    data: eventData
-  });
+  try {
+    chrome.runtime.sendMessage({
+      type: 'SYNC_EVENT',
+      data: eventData
+    }, () => {
+      // Check for errors (extension context invalidated)
+      if (chrome.runtime.lastError) {
+        console.log('[VideoSync] Extension context invalidated, please reload the page');
+      }
+    });
+  } catch (error) {
+    console.log('[VideoSync] Failed to send event:', error.message);
+  }
 }
 
 // Listen for messages from background script
-chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
   if (message.type === 'REMOTE_EVENT') {
     handleRemoteEvent(message.data);
   } else if (message.type === 'START_SYNC') {
     startHeartbeatSync();
   } else if (message.type === 'STOP_SYNC') {
     stopHeartbeatSync();
+  } else if (message.type === 'SYNC_STATE') {
+    if (message.data && video) {
+      checkSync(message.data.currentTime, video.currentTime);
+    }
   } else if (message.type === 'GET_VIDEO_STATE') {
     // Send current video state
     if (video) {
@@ -117,6 +130,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       });
     }
   }
+  return true;
 });
 
 // Handle remote events from partner
@@ -159,20 +173,28 @@ function handleRemoteEvent(data) {
 function startHeartbeatSync() {
   if (syncInterval) return;
 
+  console.log('[VideoSync] Heartbeat sync started');
+
   syncInterval = setInterval(() => {
     if (!video) return;
 
     // Request partner's state
-    chrome.runtime.sendMessage({
-      type: 'REQUEST_SYNC',
-      data: {
-        currentTime: video.currentTime,
-        paused: video.paused
-      }
-    });
+    try {
+      chrome.runtime.sendMessage({
+        type: 'REQUEST_SYNC',
+        data: {
+          currentTime: video.currentTime,
+          paused: video.paused
+        }
+      }, () => {
+        if (chrome.runtime.lastError) {
+          console.log('[VideoSync] Extension context invalidated');
+        }
+      });
+    } catch (error) {
+      console.log('[VideoSync] Failed to send sync request:', error.message);
+    }
   }, 5000);
-
-  console.log('[VideoSync] Heartbeat sync started');
 }
 
 // Stop heartbeat sync
@@ -201,4 +223,4 @@ if (document.readyState === 'loading') {
   init();
 }
 
-console.log('[VideoSync] Content script loaded');
+console.log('[VideoSync] Content script loaded (event-driven mode)');

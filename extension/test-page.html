@@ -1,0 +1,219 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Video Sync Test Page</title>
+    <style>
+        body {
+            font-family: monospace;
+            padding: 20px;
+            background: #1e1e1e;
+            color: #fff;
+        }
+        .log {
+            background: #2d2d2d;
+            padding: 10px;
+            margin: 10px 0;
+            border-radius: 5px;
+        }
+        button {
+            background: #007acc;
+            color: white;
+            border: none;
+            padding: 10px 20px;
+            margin: 5px;
+            border-radius: 5px;
+            cursor: pointer;
+        }
+        button:hover {
+            background: #005a9e;
+        }
+        video {
+            width: 100%;
+            max-width: 640px;
+            margin: 20px 0;
+        }
+        #status {
+            padding: 10px;
+            margin: 10px 0;
+            border-radius: 5px;
+        }
+        .connected { background: #2d5016; }
+        .disconnected { background: #5a1616; }
+    </style>
+</head>
+<body>
+    <h1>Video Sync Extension Test Page</h1>
+
+    <div id="status" class="disconnected">
+        Status: Checking...
+    </div>
+
+    <div class="log">
+        <h3>Extension Configuration:</h3>
+        <div id="config">Loading...</div>
+    </div>
+
+    <div class="log">
+        <h3>Service Worker Status:</h3>
+        <div id="sw-status">Checking...</div>
+    </div>
+
+    <div>
+        <button onclick="checkConfig()">Check Configuration</button>
+        <button onclick="testConnection()">Test Connection</button>
+        <button onclick="clearConfig()">Clear All Config</button>
+    </div>
+
+    <h2>Test Video</h2>
+    <video controls>
+        <source src="https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/BigBuckBunny.mp4" type="video/mp4">
+    </video>
+
+    <div class="log">
+        <h3>Console Log:</h3>
+        <div id="console" style="font-size: 12px;"></div>
+    </div>
+
+    <script>
+        let logCount = 0;
+
+        function log(message, data = null) {
+            logCount++;
+            const consoleDiv = document.getElementById('console');
+            const entry = document.createElement('div');
+            entry.style.padding = '5px';
+            entry.style.borderBottom = '1px solid #444';
+
+            const timestamp = new Date().toLocaleTimeString();
+            entry.textContent = `[${timestamp}] ${message}`;
+
+            if (data) {
+                const dataDiv = document.createElement('pre');
+                dataDiv.style.marginLeft = '20px';
+                dataDiv.style.color = '#9cdcfe';
+                dataDiv.textContent = JSON.stringify(data, null, 2);
+                entry.appendChild(dataDiv);
+            }
+
+            consoleDiv.insertBefore(entry, consoleDiv.firstChild);
+
+            if (logCount > 50) {
+                consoleDiv.removeChild(consoleDiv.lastChild);
+                logCount--;
+            }
+        }
+
+        async function checkConfig() {
+            log('Checking configuration...');
+
+            try {
+                const result = await chrome.storage.local.get(['serverUrl', 'apiKey', 'roomId', 'connectionState', 'userId', 'autoSync', 'isCreator']);
+
+                document.getElementById('config').innerHTML = `
+                    <pre style="color: #9cdcfe;">
+Server URL: ${result.serverUrl || 'NOT SET'}
+API Key: ${result.apiKey ? '***' + result.apiKey.slice(-4) : 'NOT SET'}
+Room ID: ${result.roomId || 'NOT SET'}
+User ID: ${result.userId || 'NOT SET'}
+Is Creator: ${result.isCreator ? 'YES' : 'NO'}
+Auto Sync: ${result.autoSync !== false ? 'YES' : 'NO'}
+
+Connection State:
+${result.connectionState ? JSON.stringify(result.connectionState, null, 2) : 'NOT SET'}
+                    </pre>
+                `;
+
+                log('Configuration loaded', result);
+
+                // Check service worker status
+                const response = await chrome.runtime.sendMessage({ type: 'GET_STATUS' });
+                log('Service worker status', response);
+
+                const statusDiv = document.getElementById('status');
+                if (response && response.connected) {
+                    statusDiv.className = 'connected';
+                    statusDiv.textContent = `Status: Connected to room ${response.roomId}`;
+                } else {
+                    statusDiv.className = 'disconnected';
+                    statusDiv.textContent = 'Status: Not connected';
+                }
+
+            } catch (error) {
+                log('Error checking config', error.message);
+            }
+        }
+
+        async function testConnection() {
+            log('Testing connection to server...');
+
+            const result = await chrome.storage.local.get(['serverUrl', 'apiKey']);
+
+            if (!result.serverUrl || !result.apiKey) {
+                log('ERROR: Server URL or API Key not configured');
+                alert('Please configure the extension first (click the extension icon)');
+                return;
+            }
+
+            log('Attempting WebSocket connection...', {
+                serverUrl: result.serverUrl
+            });
+
+            try {
+                const ws = new WebSocket(result.serverUrl);
+
+                ws.onopen = () => {
+                    log('✓ WebSocket connection opened');
+                    ws.send(JSON.stringify({
+                        type: 'authenticate',
+                        apiKey: result.apiKey
+                    }));
+                };
+
+                ws.onmessage = (event) => {
+                    const data = JSON.parse(event.data);
+                    log('← Received from server', data);
+
+                    if (data.type === 'authenticated' && data.success) {
+                        log('✓ Authentication successful!');
+                        setTimeout(() => ws.close(), 500);
+                    }
+                };
+
+                ws.onerror = (error) => {
+                    log('✗ WebSocket error', error.message);
+                };
+
+                ws.onclose = () => {
+                    log('WebSocket connection closed');
+                };
+
+            } catch (error) {
+                log('✗ Failed to create WebSocket', error.message);
+            }
+        }
+
+        async function clearConfig() {
+            if (confirm('Clear all extension configuration?')) {
+                await chrome.storage.local.clear();
+                log('✓ Configuration cleared');
+                checkConfig();
+            }
+        }
+
+        // Listen for extension messages
+        chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+            log('Extension message received', message);
+        });
+
+        // Log video events
+        const video = document.querySelector('video');
+        video.addEventListener('play', () => log('Video: PLAY event'));
+        video.addEventListener('pause', () => log('Video: PAUSE event'));
+        video.addEventListener('seeked', () => log('Video: SEEKED event'));
+
+        // Initial check
+        checkConfig();
+        log('Test page loaded');
+    </script>
+</body>
+</html>
