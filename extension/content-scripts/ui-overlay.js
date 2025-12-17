@@ -1,3 +1,4 @@
+
 // VideoSync UI Overlay - Injected into video pages
 // This creates a floating panel for room management and connection status
 
@@ -535,7 +536,6 @@ class VideoSyncUI {
           align-items: center;
           margin-bottom: 12px;
           cursor: move;
-          gap: 10px;
         }
 
         .videosync-title {
@@ -545,18 +545,6 @@ class VideoSyncUI {
           display: flex;
           align-items: center;
           gap: 8px;
-        }
-
-        .vs-username-badge {
-          color: #999;
-          font-size: 12px;
-          background: rgba(255, 255, 255, 0.1);
-          padding: 4px 8px;
-          border-radius: 12px;
-          display: flex;
-          align-items: center;
-          gap: 4px;
-          flex-shrink: 0;
         }
 
         .videosync-status {
@@ -741,7 +729,6 @@ class VideoSyncUI {
             <div class="videosync-status" id="vs-status"></div>
             <span>VideoSync</span>
           </div>
-          <div class="vs-username-badge">👤 ${this.username || 'Guest'}</div>
           <button class="videosync-minimize" id="vs-minimize">−</button>
         </div>
 
